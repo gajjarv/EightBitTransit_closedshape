@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "closedshape"
+version = "0.1.0"
+description = "Closed-shape shadow imaging of transit light curves: an EightBitTransit-style inverter with a curved-orbit, exact-limb-darkening forward model and connected-blob / parametric-outline priors"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.22", "scipy>=1.8", "matplotlib>=3.5"]
+
+[project.optional-dependencies]
+test = ["pytest", "batman-package"]
+
+[project.scripts]
+closedshape = "closedshape.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
