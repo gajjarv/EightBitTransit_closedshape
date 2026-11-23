@@ -111,6 +111,8 @@ class TransitingImage:
                 'closed-regularized' - opt-in add-on: 'closed' + smoothness (lam, default 0.3) + compactness
                             (mu, default 10, centred on mid-transit at the sphere-fit impact parameter) + hole filling.
                             This is the 0.1.0 'closed' method.
+                'closed-compact' - shortcut for 'closed-regularized' with lam=0: connected region + compactness
+                            (mu, default 10) + hole filling, no smoothness. Same code path, no new algorithm.
                 'sphere' | 'ellipse' | 'fourier' - parametric outline, rasterised onto the grid
         """
         f, e = self._data(fluxes, errors)
@@ -122,6 +124,10 @@ class TransitingImage:
             if "lam" in kw or "mu" in kw:
                 raise ValueError("'closed' has no smoothness/compactness terms; use method='closed-regularized'")
             self.opacitymat, self.support = closed_pixel(self.design(), f, e, self.N, self.M, return_support=True, **kw)
+        elif method == "closed-compact":
+            if "lam" in kw:
+                raise ValueError("'closed-compact' has no smoothness term; use method='closed-regularized' for lam")
+            self.invertLC(f, e, method="closed-regularized", lam=0.0, mu=kw.pop("mu", 10.0), **kw)
         elif method == "closed-regularized":
             lam, mu = kw.pop("lam", 0.3), kw.pop("mu", 10.0)
             sph = self.fits.get("sphere") or self.fit("sphere", f, e)

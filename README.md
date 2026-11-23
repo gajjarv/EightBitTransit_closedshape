@@ -4,6 +4,7 @@
 
 1. **A more accurate forward model.** The occulter follows the real curved circular orbit instead of a straight line. Limb darkening is evaluated exactly with sub-pixel sampling. Pixels that straddle the stellar limb get partial coverage.
 2. **A single-object prior.** The default pixel method `closed` adds exactly one assumption to plain least squares: the occulter's pixels form **one connected region**. It has no smoothness term and no compactness term. Optional add-ons, each of which you have to ask for:
+   - `closed-compact`: `closed` + compactness + hole filling, no smoothness (opt-in; same as `closed-regularized --smooth 0`);
    - `closed-regularized`: `closed` + smoothness + compactness + hole filling (this was `closed` in 0.1.0);
    - parametric closed outlines: sphere, ellipse, or ellipse × Fourier deformation.
 
@@ -101,6 +102,7 @@ lc, t_out = ti.gen_LC(t)
 ti = cs.TransitingImage(N=20, M=15, LDlaw="nonlinear", LDCs=c, a=3.0, P=1.0,
                         t_ref=0.0, t_arr=t, fluxes=flux, errors=err)   # your normalised data
 img = ti.invertLC(method="closed")              # one connected region, nothing else
+img_cmp = ti.invertLC(method="closed-compact", mu=10)                # opt-in: + compactness only
 img_reg = ti.invertLC(method="closed-regularized", lam=0.3, mu=10)   # opt-in: + smoothness + compactness
 img_clsq = ti.invertLC(method="clsq")            # unregularised weighted CLSQ (EBT-like)
 ell = ti.fit("ellipse")                          # dict: f, sig_f, b, r_area, chi2, dchi2_vs_sphere, opacitymat
@@ -124,7 +126,7 @@ The input is a text or CSV file with columns `time[d] flux [err]`, with time mea
 - `opacitymat_<method>.txt/.png`
 - `lightcurve.png`
 
-`--method` is one of `closed | clsq | closed-regularized | sphere | ellipse | fourier | all`. Options: `--fill-holes` (closed), `--smooth LAM --compact MU` (closed-regularized only; defaults 0.3 and 10). With `--v` and no `--a`, the path is straight, as in EightBitTransit.
+`--method` is one of `closed | clsq | closed-compact | closed-regularized | sphere | ellipse | fourier | all`. Options: `--fill-holes` (closed), `--compact MU` (closed-compact and closed-regularized; default 10), `--smooth LAM` (closed-regularized only; default 0.3). With `--v` and no `--a`, the path is straight, as in EightBitTransit.
 
 ### Examples
 

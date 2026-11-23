@@ -119,3 +119,22 @@ def test_functional_invertLC_ebt_signature():
     g, ti = cs.invertLC(12, 12, 2 * np.pi * 3.0, 0.0, t, y, np.full_like(y, 200e-6), "closed",
                         LDlaw="quadratic", LDCs=[0.4, 0.2], a=3.0)
     assert g.shape == (12, 12) and ti.orbit.curved and abs(ti.orbit.P - 1.0) < 1e-9
+
+
+def test_closed_compact_is_regularized_without_smoothness():
+    """'closed-compact' is only a shortcut for 'closed-regularized' with lam=0 (no new algorithm)."""
+    import pytest
+    from closedshape import TransitingImage
+    t = np.linspace(-0.15, 0.15, 160)
+    truth = TransitingImage(N=12, M=12, v=18.85, t_arr=t, LDlaw="quadratic", LDCs=[0.3, 0.2])
+    ys, xs = np.mgrid[:12, :12]
+    truth.opacitymat = (((ys - 5.5) / 2.5) ** 2 + ((xs - 5.5) / 3.0) ** 2 <= 1).astype(float)
+    f = truth.gen_LC()[0]
+    e = np.full_like(f, 2e-4)
+    a = TransitingImage(N=12, M=12, v=18.85, t_arr=t, LDlaw="quadratic", LDCs=[0.3, 0.2], fluxes=f, errors=e)
+    g1 = a.invertLC(method="closed-compact", mu=10).copy()
+    b = TransitingImage(N=12, M=12, v=18.85, t_arr=t, LDlaw="quadratic", LDCs=[0.3, 0.2], fluxes=f, errors=e)
+    g2 = b.invertLC(method="closed-regularized", lam=0.0, mu=10)
+    assert np.array_equal(g1, g2)
+    with pytest.raises(ValueError):
+        a.invertLC(method="closed-compact", lam=0.3)

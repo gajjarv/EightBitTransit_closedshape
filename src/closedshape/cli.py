@@ -20,11 +20,12 @@ def main(argv=None):
     p.add_argument("--ld", type=float, nargs="*", default=[], help="LD coefficients")
     p.add_argument("--exptime", type=float, default=None, help="exposure time in seconds (supersampled x5)")
     p.add_argument("--method", default="closed",
-                   choices=["closed", "clsq", "closed-regularized", "sphere", "ellipse", "fourier", "all"],
-                   help="closed = connected-only (default); closed-regularized = + smoothness + compactness (opt-in)")
+                   choices=["closed", "clsq", "closed-compact", "closed-regularized", "sphere", "ellipse", "fourier", "all"],
+                   help="closed = connected-only (default); closed-compact = + compactness (opt-in); "
+                        "closed-regularized = + smoothness + compactness (opt-in)")
     p.add_argument("--fill-holes", action="store_true", help="closed: also assume the region has no holes")
     p.add_argument("--smooth", type=float, default=0.3, help="closed-regularized only: smoothness weight lam")
-    p.add_argument("--compact", type=float, default=10.0, help="closed-regularized only: compactness weight mu")
+    p.add_argument("--compact", type=float, default=10.0, help="closed-compact / closed-regularized: compactness weight mu")
     p.add_argument("--normalize", action="store_true", help="divide by median of the outer 20%% of points")
     p.add_argument("--out", default="closedshape_out")
     a = p.parse_args(argv)
@@ -44,8 +45,10 @@ def main(argv=None):
         kw = {"fill_holes": True} if (m == "closed" and a.fill_holes) else {}
         if m == "closed-regularized":
             kw = {"lam": a.smooth, "mu": a.compact}
+        if m == "closed-compact":
+            kw = {"mu": a.compact}
         g = ti.invertLC(method=m, **kw)
-        lc = ti.gen_LC()[0] if m in ("closed", "clsq", "closed-regularized") else ti.fits[m]["model_LC"]
+        lc = ti.gen_LC()[0] if m in ("closed", "clsq", "closed-compact", "closed-regularized") else ti.fits[m]["model_LC"]
         s = {"rms_ppm": float(np.std(lc - f) * 1e6), "chi2": float(np.sum(((lc - f) / e) ** 2))}
         if m in ti.fits and m in ("sphere", "ellipse", "fourier"):
             r = ti.fits[m]

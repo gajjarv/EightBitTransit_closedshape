@@ -6,4 +6,4 @@ from .shapes import ShapeModel, fit_sphere, fit_ellipse, fit_fourier, f_to_e, e_
 from .utils import pixelize_ellipse, image_metrics, load_lightcurve
 from .image import TransitingImage, invertLC
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

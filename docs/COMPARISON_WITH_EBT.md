@@ -15,6 +15,8 @@ connected-only; the 0.1.0 version, commit `208d202`, is now called `closed-regul
      term, no compactness term, no sphere-fit centring and (by default) no hole filling.
 - `closed-regularized` is an **opt-in add-on**, and it is the 0.1.0 `closed`. It is `closed` plus a smoothness
   penalty, a pull towards a centre (set by a sphere fit) and hole filling.
+- `closed-compact` (0.2.1) is a **shortcut** for `closed-regularized` with the smoothness weight set to 0. It is `closed`
+  plus the pull towards the sphere-fit centre and hole filling. It uses the same code, with no new algorithm.
 - `clsq` in this package is the **EBT-like baseline**. It is plain bounded least squares on the full grid, using our
   forward model, with no folding and no regularisation.
 - `sphere`, `ellipse` and `fourier` are **parametric outlines we added**. They are not part of EBT, and this page
