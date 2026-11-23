@@ -2,7 +2,7 @@
 import numpy as np
 from .limbdark import make_intensity
 from .forward import Orbit, pixel_design, supersample_times, rebin
-from .pixel import clsq, closed_pixel
+from .pixel import clsq, closed_pixel, closed_pixel_regularized
 from .shapes import ShapeModel, fit_sphere, fit_ellipse, fit_fourier
 
 
@@ -102,11 +102,15 @@ class TransitingImage:
         self.fits[kind] = res
         return res
 
-    def invertLC(self, fluxes=None, errors=None, method="closed", lam=0.3, mu=10.0, **kw):
+    def invertLC(self, fluxes=None, errors=None, method="closed", **kw):
         """Invert the light curve to an N x M opacity image and store it in self.opacitymat.
 
-        method: 'closed'  - closed-shape pixel inversion (single connected hole-free blob; recommended)
+        method: 'closed'  - connected-only pixel inversion: plain CLSQ restricted to one connected region of pixels.
+                            No smoothness, no compactness. Options: thr, n_iter, dilate, fill_holes (default False).
                 'clsq'    - plain weighted bounded least squares on the full grid (closest to EightBitTransit CLSQ)
+                'closed-regularized' - opt-in add-on: 'closed' + smoothness (lam, default 0.3) + compactness
+                            (mu, default 10, centred on mid-transit at the sphere-fit impact parameter) + hole filling.
+                            This is the 0.1.0 'closed' method.
                 'sphere' | 'ellipse' | 'fourier' - parametric outline, rasterised onto the grid
         """
         f, e = self._data(fluxes, errors)
@@ -115,9 +119,15 @@ class TransitingImage:
         elif method == "clsq":
             self.opacitymat = clsq(self.design(), f, e, self.N, self.M, **kw)
         elif method == "closed":
+            if "lam" in kw or "mu" in kw:
+                raise ValueError("'closed' has no smoothness/compactness terms; use method='closed-regularized'")
+            self.opacitymat, self.support = closed_pixel(self.design(), f, e, self.N, self.M, return_support=True, **kw)
+        elif method == "closed-regularized":
+            lam, mu = kw.pop("lam", 0.3), kw.pop("mu", 10.0)
             sph = self.fits.get("sphere") or self.fit("sphere", f, e)
             A = self.design(b_ref=sph["b"] if self.orbit.curved else self.orbit.b)
-            self.opacitymat = closed_pixel(A, f, e, self.N, self.M, lam=lam, mu=mu, centre=(0.0, sph["b"]), **kw)
+            self.opacitymat = closed_pixel_regularized(A, f, e, self.N, self.M, lam=lam, mu=mu,
+                                                       centre=(0.0, sph["b"]), **kw)
         else:
             raise ValueError(f"unknown method {method!r}")
         self.method = method
@@ -156,8 +166,8 @@ def invertLC(N, M, v, t_ref, t_arr, obsLC, obsLCerr, method="closed", LDlaw="uni
              b=0.0, exptime=None, supersample=1, **kwargs):
     """Functional entry point with EightBitTransit's ``inversion.invertLC`` argument order.
 
-    EightBitTransit methods are 'SART', 'arcAvg', 'arcPars', 'arcComb'; here method is 'closed' (default), 'clsq',
-    'sphere', 'ellipse' or 'fourier'. Pass a (and P, or v) to use the curved orbit; with v only the path is straight.
+    EightBitTransit methods are 'SART', 'arcAvg', 'arcPars', 'arcComb'; here method is 'closed' (default, connected-only),
+    'clsq', 'closed-regularized', 'sphere', 'ellipse' or 'fourier'. Pass a (and P, or v) to use the curved orbit; with v only the path is straight.
     Returns (opacitymat, TransitingImage) rather than EightBitTransit's multi-stage outputs.
     """
     ti = TransitingImage(N=N, M=M, LDlaw=LDlaw, LDCs=list(LDCs), v=v, a=a, P=P, b=b, t_ref=t_ref, t_arr=t_arr,

@@ -19,7 +19,12 @@ def main(argv=None):
     p.add_argument("--ld-law", default="uniform", choices=["uniform", "linear", "quadratic", "nonlinear", "poly"])
     p.add_argument("--ld", type=float, nargs="*", default=[], help="LD coefficients")
     p.add_argument("--exptime", type=float, default=None, help="exposure time in seconds (supersampled x5)")
-    p.add_argument("--method", default="closed", choices=["closed", "clsq", "sphere", "ellipse", "fourier", "all"])
+    p.add_argument("--method", default="closed",
+                   choices=["closed", "clsq", "closed-regularized", "sphere", "ellipse", "fourier", "all"],
+                   help="closed = connected-only (default); closed-regularized = + smoothness + compactness (opt-in)")
+    p.add_argument("--fill-holes", action="store_true", help="closed: also assume the region has no holes")
+    p.add_argument("--smooth", type=float, default=0.3, help="closed-regularized only: smoothness weight lam")
+    p.add_argument("--compact", type=float, default=10.0, help="closed-regularized only: compactness weight mu")
     p.add_argument("--normalize", action="store_true", help="divide by median of the outer 20%% of points")
     p.add_argument("--out", default="closedshape_out")
     a = p.parse_args(argv)
@@ -31,15 +36,18 @@ def main(argv=None):
                          fluxes=f, errors=e, exptime=None if a.exptime is None else a.exptime / 86400.,
                          supersample=5 if a.exptime else 1)
     os.makedirs(a.out, exist_ok=True)
-    methods = ["sphere", "ellipse", "fourier", "closed"] if a.method == "all" else [a.method]
+    methods = ["sphere", "ellipse", "fourier", "closed", "closed-regularized"] if a.method == "all" else [a.method]
     summary = {"orbit": repr(ti.orbit), "N": ti.N, "M": ti.M, "n_points": len(t)}
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     for m in methods:
-        g = ti.invertLC(method=m)
-        lc = ti.gen_LC()[0] if m in ("closed", "clsq") else ti.fits[m]["model_LC"]
+        kw = {"fill_holes": True} if (m == "closed" and a.fill_holes) else {}
+        if m == "closed-regularized":
+            kw = {"lam": a.smooth, "mu": a.compact}
+        g = ti.invertLC(method=m, **kw)
+        lc = ti.gen_LC()[0] if m in ("closed", "clsq", "closed-regularized") else ti.fits[m]["model_LC"]
         s = {"rms_ppm": float(np.std(lc - f) * 1e6), "chi2": float(np.sum(((lc - f) / e) ** 2))}
-        if m in ti.fits:
+        if m in ti.fits and m in ("sphere", "ellipse", "fourier"):
             r = ti.fits[m]
             s.update({k: float(r[k]) for k in ("r", "r_area", "f", "sig_f", "b", "chi2", "dchi2_vs_sphere", "aspect") if k in r})
         summary[m] = s

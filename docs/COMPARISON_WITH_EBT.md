@@ -3,19 +3,22 @@
 This page explains, in plain language, how this package differs from the original shadow-imaging code
 [EightBitTransit](https://github.com/esandford/EightBitTransit) (Sandford & Kipping 2019). Every statement about EBT
 refers to a function in upstream EBT (commit `51cb4c0`, files `EightBitTransit/*.pyx` and `examples/*.ipynb`). Every
-statement about this package refers to a function in `src/closedshape/` at commit `208d202`.
+statement about this package refers to a function in `src/closedshape/` at version 0.2.0. In 0.2.0 `closed` became
+connected-only; the 0.1.0 version, commit `208d202`, is now called `closed-regularized`.
 
 **Short version:**
 - `closed` is a pixel inversion, like EBT's. It uses the same grid layout and the same bounded `[0, 1]`
-  least-squares solver as EBT's constrained-least-squares (CLSQ) example. It adds three things that EBT doesn't have:
-  1. a better forward model (curved orbit, limb darkening evaluated per sub-pixel, exposure smearing, noise weighting);
+  least-squares solver as EBT's constrained-least-squares (CLSQ) example. Compared with EBT CLSQ it changes:
+  1. the forward model (curved orbit, limb darkening evaluated per sub-pixel, exposure smearing, noise weighting);
   2. no up/down folding: the full grid is solved;
-  3. a "one compact, smooth blob" prior. This is a smoothness penalty, a pull towards a centre, and a restriction to
-     one connected patch of pixels.
+  3. **one physical rule:** opacity may be non-zero only inside one connected region of pixels. It has no smoothness
+     term, no compactness term, no sphere-fit centring and (by default) no hole filling.
+- `closed-regularized` is an **opt-in add-on**, and it is the 0.1.0 `closed`. It is `closed` plus a smoothness
+  penalty, a pull towards a centre (set by a sphere fit) and hole filling.
 - `clsq` in this package is the **EBT-like baseline**. It is plain bounded least squares on the full grid, using our
   forward model, with no folding and no regularisation.
 - `sphere`, `ellipse` and `fourier` are **parametric outlines we added**. They are not part of EBT, and this page
-  only mentions them where `closed` depends on them (it uses a sphere fit to choose its centre).
+  only mentions them where `closed-regularized` depends on them (it uses a sphere fit to choose its centre).
 - **No EBT source code is included or modified in this package.** Everything in `src/closedshape/` is new code that
   copies EBT's grid and interface conventions. The only EBT code we patched is a local copy of the EBT GPU fork,
   which we used to make the baseline comparison figures. Those patches are listed in
@@ -103,54 +106,59 @@ symmetric answer. They differ in how they do that.
 
 ## 2. Side-by-side table
 
-| | EBT SART | EBT arcAvg / arcPars / arcComb | EBT CLSQ (notebook) | **closedshape `clsq`** (baseline) | **closedshape `closed`** |
-|---|---|---|---|---|---|
-| **Shared with EBT** | – | – | – | Grid layout (`grid_coords` = EBT `positions`), opacity in [0, 1], `lsq_linear` solver, `TransitingImage`/`gen_LC`/`invertLC` names, LD law names | Same as `clsq`, plus the same idea: "find the pixel opacities that reproduce the light curve" |
-| **Unknowns** | N/2 × M (top half) | N × M, but filled in mirror pairs | ⌈N/2⌉ × M mirror pairs | N × M (full grid) | N × M (full grid); in practice only the pixels inside one connected support region |
-| **Constraints / priors** | None (wedge clean-up afterwards) | Flux change matched arc by arc; parsimony = fewest pixels; combinatorics = best 0.5-unit combination; mean over time steps | Bounds [0, 1] only | Bounds [0, 1] only | Bounds [0, 1] + **smoothness** (`lam=0.3`, penalty on differences between neighbouring pixels) + **compactness** (`mu=10`, penalty that grows with squared distance from a centre) + **single connected support** |
-| **Symmetry / folding** | Top half solved, mirrored, halved | Mirror pairs set together, then mirror-averaged | Folded design matrix → mirror-symmetric | **None**; the full grid is solved | **None imposed.** One blob is kept, and its centre is put at the sphere fit's impact parameter b ≥ 0, so it lands in the **upper half by convention** |
-| **Connectedness** | Not enforced | Not enforced | Not enforced | Not enforced | Enforced on the **support**: the largest 4-connected region of pixels above 0.3 × max, holes filled, grown by 1 pixel, then refit (twice). Pixels inside the support can still go to 0, so the final non-zero pixels are *usually* but not *always* one piece |
-| **Opacity bounds** | Unbounded while solving; out-of-range values moved by wedge steps; rounded | Built from 0, 0.5, 1 units, then rescaled and clipped to [0, 1] | [0, 1] | [0, 1] | [0, 1] |
-| **Forward model** | EBT `gen_LC`: exact pixel–disk overlap area (`pixeloverlaparea`) × small-planet LD (`LDfluxsmall`) | same | same (`calculateLCdecrements`) | **New, not reused from EBT:** `forward.pixel_design`, with each pixel split into 6×6 sub-pixels, exact I(μ) per sub-pixel, and partial coverage at the stellar limb | same as `clsq` |
-| **Orbit / velocity** | Straight line, speed `v` | Straight line, `v` | Straight line, `v` | Straight line with `--v` (same as EBT), **or** curved circular orbit with `--a --P` (`forward.Orbit`) | same as `clsq` |
-| **Limb darkening** | uniform / linear / quadratic / nonlinear, all turned into 4-parameter nonlinear for `LDfluxsmall` | same | same | Same laws plus `poly`; I(μ) evaluated directly (`limbdark.make_intensity`) | same |
-| **Exposure time** | Not modelled | Not modelled | Not modelled | `exptime` + `supersample` (`forward.supersample_times`, `rebin`) | same |
-| **Use of data errors** | Only for χ² reporting | Only for χ² reporting | Not used | Residuals divided by σ (noise-weighted) | Noise-weighted |
-| **Optimiser** | Fixed number of SART iterations | Greedy (pars) or exhaustive per-step search (comb); mean over steps | `scipy.optimize.lsq_linear` | `lsq_linear(..., lsmr_tol="auto", max_iter=3000)` | The same `lsq_linear`, run 3 times (initial + 2 support refits), plus one parametric **sphere fit** (`scipy.optimize.least_squares`) to set the compactness centre |
-| **Uncertainties** | None | None | None | None | None (the parametric fits give σ_f; `closed` does not) |
-| **Inputs required** | N, M, v, t_ref, t, flux, err, LD; `n_iter`, `initstate`, `filename` | N, M, v, t_ref, t, flux, err, LD | same | N, M, (v) or (a, P), t_ref, t, flux, err, LD; optional `exptime`, `ss` | Same as `clsq`; tuning knobs `lam`, `mu`, `thr`, `n_iter`, `dilate` have defaults |
-| **Edge handling** | – | – | First columns zeroed by hand, depending on v | No zeroing by default (`zero_cols=0`) | Compactness term keeps opacity away from the grid edges |
+| | EBT SART | EBT arcAvg / arcPars / arcComb | EBT CLSQ (notebook) | **closedshape `clsq`** (baseline) | **closedshape `closed`** (default) | `closed-regularized` (opt-in add-on) |
+|---|---|---|---|---|---|---|
+| **Shared with EBT** | – | – | – | Grid layout (`grid_coords` = EBT `positions`), opacity in [0, 1], `lsq_linear` solver, `TransitingImage`/`gen_LC`/`invertLC` names, LD law names | Same as `clsq` | Same as `clsq` |
+| **Unknowns** | N/2 × M (top half) | N × M, but filled in mirror pairs | ⌈N/2⌉ × M mirror pairs | N × M (full grid) | N × M; only pixels inside one connected region may be non-zero | Same as `closed` |
+| **Constraints / priors** | None (wedge clean-up afterwards) | Flux change matched arc by arc; parsimony = fewest pixels; combinatorics = best 0.5-unit combination; mean over time steps | Bounds [0, 1] only | Bounds [0, 1] only | Bounds [0, 1] + **one connected region**. Nothing else | `closed` + **smoothness** (`lam=0.3`) + **compactness** (`mu=10`, pull towards a centre) + holes filled |
+| **Symmetry / folding** | Top half solved, mirrored, halved | Mirror pairs set together, then mirror-averaged | Folded design matrix → mirror-symmetric | **None**; the full grid is solved | **None imposed.** If the mirror copies are separate patches, the one with more opacity is kept (an exact tie goes to the upper half); if they touch at the chord, both stay | **None imposed.** The centre is at the sphere fit's b ≥ 0, so the blob goes in the **upper half by convention** |
+| **Connectedness** | Not enforced | Not enforced | Not enforced | Not enforced | Enforced on the **allowed region**: the largest 4-connected patch of pixels above 0.3 × max, grown by 1 pixel, then refit (twice). Holes are allowed unless `fill_holes=True`. Pixels inside the region can still come out at 0 | Same, with holes filled |
+| **Opacity bounds** | Unbounded while solving; out-of-range values moved by wedge steps; rounded | Built from 0, 0.5, 1 units, then rescaled and clipped to [0, 1] | [0, 1] | [0, 1] | [0, 1] | [0, 1] |
+| **Forward model** | EBT `gen_LC`: exact pixel–disk overlap area (`pixeloverlaparea`) × small-planet LD (`LDfluxsmall`) | same | same (`calculateLCdecrements`) | **New, not reused from EBT:** `forward.pixel_design`, with each pixel split into 6×6 sub-pixels, exact I(μ) per sub-pixel, and partial coverage at the stellar limb | same as `clsq` | same as `clsq` (for curved orbits the grid's reference height is the sphere-fit b) |
+| **Orbit / velocity** | Straight line, speed `v` | Straight line, `v` | Straight line, `v` | Straight line with `--v` (same as EBT), **or** curved circular orbit with `--a --P` (`forward.Orbit`) | same as `clsq` | same as `clsq` |
+| **Limb darkening** | uniform / linear / quadratic / nonlinear, all turned into 4-parameter nonlinear for `LDfluxsmall` | same | same | Same laws plus `poly`; I(μ) evaluated directly (`limbdark.make_intensity`) | same | same |
+| **Exposure time** | Not modelled | Not modelled | Not modelled | `exptime` + `supersample` (`forward.supersample_times`, `rebin`) | same | same |
+| **Use of data errors** | Only for χ² reporting | Only for χ² reporting | Not used | Residuals divided by σ (noise-weighted) | Noise-weighted | Noise-weighted |
+| **Optimiser** | Fixed number of SART iterations | Greedy (pars) or exhaustive per-step search (comb); mean over steps | `scipy.optimize.lsq_linear` | `lsq_linear(..., lsmr_tol="auto", max_iter=3000)` | The same `lsq_linear`, run 3 times (initial + 2 refits inside the region) | The same, plus one parametric sphere fit (`scipy.optimize.least_squares`) to set the centre |
+| **Uncertainties** | None | None | None | None | None | None |
+| **Inputs required** | N, M, v, t_ref, t, flux, err, LD; `n_iter`, `initstate`, `filename` | N, M, v, t_ref, t, flux, err, LD | same | N, M, (v) or (a, P), t_ref, t, flux, err, LD; optional `exptime`, `ss` | Same as `clsq`; knobs `thr`, `n_iter`, `dilate`, `fill_holes` have defaults | Same, plus `lam` (`--smooth`), `mu` (`--compact`) |
+| **Edge handling** | – | – | First columns zeroed by hand, depending on v | No zeroing by default (`zero_cols=0`) | No zeroing; edge pixels can be used if they are attached to the main patch | Compactness keeps opacity away from the grid edges |
 
 ---
 
-## 3. Every assumption the `closed` method adds (compared with EBT CLSQ)
+## 3. Every assumption `closed` adds (compared with EBT CLSQ)
 
 **Physical choices** (statements about the object or the orbit; wrong if the object isn't like this):
-1. **One object.** The occulter is a single, closed, hole-free body (`pixel.largest_blob`, `binary_fill_holes`).
-   Rings, tails, debris clouds or several bodies break this assumption.
-2. **Compact and roughly centred on mid-transit.** Opacity is pulled towards the point (x = 0, y = b_sphere)
-   (`closed_pixel(..., centre=(0.0, sph["b"]))`). This assumes the object's centre crosses at `t_ref` and at the
-   height a sphere fit prefers.
-3. **Smooth.** Neighbouring pixels should have similar opacity (`gradient_matrix`, `lam`).
-4. **Rigid, non-rotating silhouette.** Its shape on the sky stays the same during the transit (`forward.blocked_flux`).
+1. **One connected object.** Opacity is allowed only inside one connected patch of pixels (`pixel.closed_pixel`,
+   `pixel.largest_blob`). Rings with gaps, detached tails, debris clouds or several bodies break this assumption. A
+   ring or annulus *is* allowed (holes are not filled unless you pass `fill_holes=True` / `--fill-holes`, which adds a
+   second assumption: "no holes").
+2. **Rigid, non-rotating silhouette.** Its shape on the sky stays the same during the transit (`forward.blocked_flux`).
    EBT assumes this too.
-5. **Path.** Either the straight line at speed `v` (the same as EBT) or, if you give a/R\* and P, a circular orbit
+3. **Path.** Either the straight line at speed `v` (the same as EBT) or, if you give a/R\* and P, a circular orbit
    (`Orbit`: `x = a sin φ`, `y = b cos φ`). The curved option is new, and it requires you to know a/R\* and P.
-6. **Up/down choice.** The sphere fit's b is bounded to be ≥ 0 (`fit_sphere`, bounds `[..., 0.0]` to `[..., 1.2]`),
-   so the blob is always put in the upper half. The data cannot decide this; it is a convention, just as EBT's
-   symmetric answer is a convention.
-7. **Known limb darkening, period and a/R\*.** These are taken as given. EBT also takes LD as given.
+4. **Known limb darkening, period and a/R\*.** These are taken as given. EBT also takes LD as given.
+
+**Not assumed by `closed`** (0.1.0 did assume these, and they are now only in `closed-regularized`):
+- no smoothness (`lam`), no compactness (`mu`), no pull towards mid-transit, no sphere fit, no hole filling.
+- `closed` rejects `lam`/`mu` (`TransitingImage.invertLC` raises an error and points you to `closed-regularized`).
 
 **Numerical choices** (ways of solving the problem, with no physical meaning on their own):
-1. `lam = 0.3` (smoothness weight) and `mu = 10` (compactness weight), tuned on TESS-like simulations.
-2. `thr = 0.3`: pixels above 30 % of the brightest pixel form the candidate blob.
-3. 4-connectivity, holes filled, support grown by `dilate = 1` pixel, `n_iter = 2` refits.
-4. Sphere fit set-up: start values b0 ∈ {0.05, 0.3, 0.55}; outline sampled on a 70 × 70 point grid; radius limited
-   by an internal box size `R = clip(2.4·√depth, 0.05, 1.2)`.
-5. Forward-model resolution: 6 × 6 sub-pixels per pixel (`ss=6`); 4-point averaging across the limb strip;
+1. `thr = 0.3`: pixels above 30 % of the brightest pixel form the candidate patch.
+2. 4-connectivity (pixels touching side by side, not only at corners); the patch is grown by `dilate = 1` pixel and
+   refit `n_iter = 2` times.
+3. Mirror tie-break: when the two mirror copies are separate patches with *exactly* equal opacity, the upper one is
+   kept (`largest_blob(prefer_upper=True)`). This is a convention.
+4. Forward-model resolution: 6 × 6 sub-pixels per pixel (`ss=6`); 4-point averaging across the limb strip;
    exposure smearing with `supersample` sub-exposures (the CLI uses 5 when `--exptime` is given).
-6. `lsq_linear` with `lsmr_tol="auto"` and `max_iter=3000`.
-7. All requested times are used, rather than trimming to EBT's overlap window.
+5. `lsq_linear` with `lsmr_tol="auto"` and `max_iter=3000`.
+6. All requested times are used, rather than trimming to EBT's overlap window.
+
+**Extra assumptions in the opt-in `closed-regularized`:**
+- Physical: **compact and centred** on (x = 0, y = b_sphere), i.e. crossing at `t_ref` at the height a sphere fit
+  prefers. **Smooth**. **No holes**. Up/down side set by the sphere fit's b ≥ 0 (upper half).
+- Numerical: `lam = 0.3`, `mu = 10` (tuned on TESS-like simulations). Sphere-fit start values b0 ∈ {0.05, 0.3, 0.55},
+  a 70 × 70 outline sampling, and box size `R = clip(2.4·√depth, 0.05, 1.2)`.
 
 **Removed relative to EBT** (EBT assumptions that `closed` does not make):
 - No forced up/down symmetry (EBT's folding and averaging).
@@ -172,9 +180,10 @@ symmetric answer. They differ in how they do that.
 | `forward.py: supersample_times`, `rebin` | **New** | EBT has no exposure smearing |
 | `limbdark.py: make_intensity` | **New, same law names** | EBT turns linear/quadratic into nonlinear coefficients and uses analytic annulus integrals; we evaluate I(μ) directly and integrate the total flux numerically |
 | `pixel.py: clsq` | **New, EBT-like** | The same `lsq_linear(bounds=(0, 1))` as the EBT CLSQ notebook, but on the **full** grid (no `symmetrize_design_matrix`/`unfold_opacity_map`), **noise-weighted**, with optional penalties (off by default) |
-| `pixel.py: gradient_matrix`, `largest_blob`, `closed_pixel` | **New** | No EBT counterpart. This is the closed-shape prior |
-| `shapes.py` (sphere / ellipse / fourier) | **New, not in EBT** | Parametric outlines. `closed` only uses `fit_sphere`, to pick its centre |
-| `image.py: TransitingImage`, `invertLC` | **New, EBT-style interface** | Same names and argument order as EBT's `TransitingImage` and `inversion.invertLC`, but the methods are `closed`/`clsq`/`sphere`/`ellipse`/`fourier`. `gen_LC` returns all times, not only the overlap times |
+| `pixel.py: largest_blob`, `closed_pixel` | **New** | No EBT counterpart. The connected-region rule (`closed`) |
+| `pixel.py: gradient_matrix`, `closed_pixel_regularized` | **New, opt-in add-on** | No EBT counterpart. Smoothness + compactness + hole filling (`closed-regularized`; the 0.1.0 `closed`) |
+| `shapes.py` (sphere / ellipse / fourier) | **New, not in EBT** | Parametric outlines. `closed-regularized` uses `fit_sphere` to pick its centre; `closed` does not use it |
+| `image.py: TransitingImage`, `invertLC` | **New, EBT-style interface** | Same names and argument order as EBT's `TransitingImage` and `inversion.invertLC`, but the methods are `closed`/`clsq`/`closed-regularized`/`sphere`/`ellipse`/`fourier`. `gen_LC` returns all times, not only the overlap times |
 | `cli.py`, `utils.py` | **New** | No EBT counterpart |
 | SART, arcAvg, arcPars, arcComb, wedge functions, `foldOpacities`, `bruteForceSearch` | **Not included** | Use EBT itself for these |
 
@@ -194,19 +203,28 @@ Aw = A / sg[:, None]                     # full N*M design matrix, no folding
 out = lsq_linear(As, y, bounds=(0, 1), lsmr_tol="auto", max_iter=3000)
 ```
 
-**Closed-shape prior: new in `closed_pixel`.**
+**Connected-region rule: new in `closed_pixel` (default `closed`).**
 ```python
-# closedshape, src/closedshape/pixel.py: closed_pixel
-g = clsq(A, flux, sig, N, M, lam=lam, mu=mu, centre=centre)        # smooth + compact CLSQ
+# closedshape, src/closedshape/pixel.py: closed_pixel   (no lam, no mu, no centre)
+g = clsq(A, flux, sig, N, M)                                        # plain CLSQ, full grid
 for _ in range(n_iter):
-    keep = largest_blob(g, thr)                                     # one 4-connected blob, holes filled
-    keep = ndimage.binary_dilation(keep, iterations=dilate)
-    g = clsq(A, flux, sig, N, M, lam=lam, mu=mu, centre=centre, support=keep)   # refit inside the blob only
+    k = largest_blob(g, thr, fill_holes=fill_holes)                 # one 4-connected patch (holes kept by default)
+    keep = ndimage.binary_dilation(k, iterations=dilate)
+    g = clsq(A, flux, sig, N, M, support=keep)                      # refit, zero outside the patch
 
 # closedshape, src/closedshape/image.py: TransitingImage.invertLC
-sph = self.fits.get("sphere") or self.fit("sphere", f, e)           # sphere fit sets the centre height b
-A = self.design(b_ref=sph["b"] if self.orbit.curved else self.orbit.b)
-self.opacitymat = closed_pixel(A, f, e, self.N, self.M, lam=lam, mu=mu, centre=(0.0, sph["b"]))
+elif method == "closed":
+    if "lam" in kw or "mu" in kw:
+        raise ValueError("'closed' has no smoothness/compactness terms; use method='closed-regularized'")
+    self.opacitymat, self.support = closed_pixel(self.design(), f, e, self.N, self.M, return_support=True, **kw)
+```
+
+**Opt-in add-on: `closed_pixel_regularized` (`closed-regularized`, the 0.1.0 `closed`).**
+```python
+# closedshape, src/closedshape/pixel.py: closed_pixel_regularized
+g = clsq(A, flux, sig, N, M, lam=lam, mu=mu, centre=centre)          # + smoothness + compactness
+...  largest_blob(g, thr, fill_holes=True) ... clsq(..., lam=lam, mu=mu, centre=centre, support=keep)
+# image.py: centre = (0.0, sph["b"]) from a sphere fit
 ```
 
 **Forward model: EBT's small-planet LD vs per-sub-pixel I(μ).**
@@ -250,7 +268,8 @@ analysis scripts that accompany the paper, not in this package.
 ## 5. Which method should I compare with what?
 - To see the effect of **only the better forward model**: compare EBT CLSQ with closedshape `clsq` using `--v` (a
   straight path). The remaining differences are no folding, noise weighting, the LD evaluation and exposure smearing.
-- To see the effect of **the closed-shape prior**: compare closedshape `clsq` with closedshape `closed`, run with the
+- To see the effect of **the connected-region rule alone**: compare closedshape `clsq` with closedshape `closed`.
+  To see what smoothness and compactness add on top, compare `closed` with `closed-regularized`. Run all of them with the
   same settings.
 - `sphere`/`ellipse`/`fourier` answer a different question ("which simple outline fits?"). They are not shadow-image
   inversions in the EBT sense.

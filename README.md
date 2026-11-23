@@ -3,16 +3,16 @@
 `closedshape` turns a transit light curve into a picture of the transiting object's silhouette (its "shadow image") in the style of [EightBitTransit](https://github.com/esandford/EightBitTransit) (Sandford & Kipping 2019). It differs from EightBitTransit in two ways:
 
 1. **A more accurate forward model.** The occulter follows the real curved circular orbit instead of a straight line. Limb darkening is evaluated exactly with sub-pixel sampling. Pixels that straddle the stellar limb get partial coverage.
-2. **A closed-shape prior** that removes the image-level degeneracies of shadow imaging. You can use it as:
-   - a non-parametric *single connected, hole-free blob* inversion, or
+2. **A single-object prior.** The default pixel method `closed` adds exactly one assumption to plain least squares: the occulter's pixels form **one connected region**. It has no smoothness term and no compactness term. Optional add-ons, each of which you have to ask for:
+   - `closed-regularized`: `closed` + smoothness + compactness + hole filling (this was `closed` in 0.1.0);
    - parametric closed outlines: sphere, ellipse, or ellipse × Fourier deformation.
 
-The parametric outlines (sphere, ellipse, Fourier) are **new additions**; they are not part of EightBitTransit. The pixel methods `clsq` (EightBitTransit-like baseline) and `closed` (closed-shape prior) are the direct counterparts of EightBitTransit's inversions.
+The parametric outlines (sphere, ellipse, Fourier) and `closed-regularized` are **new add-ons**; they are not part of EightBitTransit. The pixel methods `clsq` (EightBitTransit-like baseline) and `closed` (connected-only) are the direct counterparts of EightBitTransit's inversions.
 
 It keeps EightBitTransit's workflow (`TransitingImage(opacitymat / N, M, LDlaw, LDCs, v, t_ref, t_arr)`, `gen_LC`, `invertLC`, `plot_grid`). It is pure NumPy/SciPy, with no Cython and no GPU.
 
 ![injection-recovery example](docs/injection_recovery.png)
-*Oblate occulter (f = 0.5, r = 0.15 R\*, b = 0.35), TESS-like noise. Panels: truth; plain pixel least squares (EightBitTransit-like CLSQ); closed-pixel inversion; ellipse fit; closed Fourier outline. Produced by `examples/quickstart.py`.*
+*Oblate occulter (f = 0.5, r = 0.15 R\*, b = 0.35), TESS-like noise. Panels: truth; plain pixel least squares (EightBitTransit-like CLSQ); closed-pixel inversion; ellipse fit; closed Fourier outline. Made with version 0.1.0, so the closed-pixel panel is what is now called `closed-regularized`. Running `examples/quickstart.py` now shows both `closed` and `closed-regularized`.*
 
 ## How this differs from EightBitTransit
 
@@ -25,7 +25,11 @@ It keeps EightBitTransit's workflow (`TransitingImage(opacitymat / N, M, LDlaw, 
   - CLSQ (in EBT's example notebooks) folds the design matrix.
   - So every EBT image is up/down symmetric by construction.
 - **`clsq` here is the EBT-like baseline.** It solves the full grid (no folding), with noise weighting and the new forward model, and has no prior.
-- **`closed` adds** a smoothness penalty, a compactness pull towards (mid-transit, the sphere-fit impact parameter), and a single connected, hole-free support region. Its up/down side is a convention: the impact parameter b ≥ 0 puts the blob in the upper half.
+- **`closed` adds one rule:** opacity may be non-zero only inside one connected region of pixels.
+  - It has no smoothness term, no compactness term and no hole filling (`--fill-holes` turns hole filling on).
+  - It does no sphere-fit centring.
+  - If the two mirror images of the object are separate patches, the one with more opacity is kept (an exact tie goes to the upper half, by convention).
+  - **`closed-regularized`** (opt-in) adds a smoothness penalty, a compactness pull towards (mid-transit, the sphere-fit impact parameter) and hole filling.
 - **The forward model is new:**
   - per-sub-pixel limb darkening, instead of EBT's small-planet `LDfluxsmall`;
   - partial pixel coverage at the stellar limb;
@@ -47,9 +51,9 @@ On simulations, these make EightBitTransit's CLSQ images correlate only about 0.
 
 If you are willing to assume the occulter is **one closed object**, most of these solutions are ruled out:
 
-- **One connected blob** removes the mirror ambiguity.
-- **Compactness and smoothness** remove the arc streaks.
-- **A parametric closed outline** turns the problem into a handful of well-constrained parameters.
+- **One connected region** (`closed`) throws away scattered and mirrored copies that are not attached to the main patch.
+- **Compactness and smoothness** (opt-in, `closed-regularized`) also remove the arc streaks and ragged edges, but they are extra priors.
+- **A parametric closed outline** (opt-in) turns the problem into a handful of well-constrained parameters.
 
 This is a *stronger assumption*. Rings, tails, debris or multiple bodies violate it.
 
@@ -96,7 +100,8 @@ lc, t_out = ti.gen_LC(t)
 # 2) inverse: light curve -> opacity grid
 ti = cs.TransitingImage(N=20, M=15, LDlaw="nonlinear", LDCs=c, a=3.0, P=1.0,
                         t_ref=0.0, t_arr=t, fluxes=flux, errors=err)   # your normalised data
-img = ti.invertLC(method="closed")              # single connected blob (recommended)
+img = ti.invertLC(method="closed")              # one connected region, nothing else
+img_reg = ti.invertLC(method="closed-regularized", lam=0.3, mu=10)   # opt-in: + smoothness + compactness
 img_clsq = ti.invertLC(method="clsq")            # unregularised weighted CLSQ (EBT-like)
 ell = ti.fit("ellipse")                          # dict: f, sig_f, b, r_area, chi2, dchi2_vs_sphere, opacitymat
 fou = ti.fit("fourier", K=3)                     # closed star-convex outline
@@ -119,7 +124,7 @@ The input is a text or CSV file with columns `time[d] flux [err]`, with time mea
 - `opacitymat_<method>.txt/.png`
 - `lightcurve.png`
 
-`--method` is one of `closed | clsq | sphere | ellipse | fourier | all`. With `--v` and no `--a`, the path is straight, as in EightBitTransit.
+`--method` is one of `closed | clsq | closed-regularized | sphere | ellipse | fourier | all`. Options: `--fill-holes` (closed), `--smooth LAM --compact MU` (closed-regularized only; defaults 0.3 and 10). With `--v` and no `--a`, the path is straight, as in EightBitTransit.
 
 ### Examples
 
@@ -137,7 +142,8 @@ The input is a text or CSV file with columns `time[d] flux [err]`, with time mea
 | `make_intensity(law, coeffs)` | `uniform`, `linear`, `quadratic`, `nonlinear`, `poly` LD; returns `(I(mu), Ftot)` |
 | `blocked_flux`, `pixel_design`, `grid_coords`, `supersample_times`, `rebin` | Forward model building blocks |
 | `clsq(A, flux, sig, N, M, lam, mu, centre, support)` | Weighted bounded least squares, with optional smoothness and compactness penalties |
-| `closed_pixel(A, flux, sig, N, M, lam=0.3, mu=10, centre)` | Closed-shape pixel inversion |
+| `closed_pixel(A, flux, sig, N, M, thr=0.3, n_iter=2, dilate=1, fill_holes=False)` | Connected-only pixel inversion (`closed`) |
+| `closed_pixel_regularized(A, flux, sig, N, M, lam=0.3, mu=10, centre)` | Opt-in: connected + smoothness + compactness + holes filled (`closed-regularized`; 0.1.0 `closed`) |
 | `ShapeModel`, `fit_sphere`, `fit_ellipse`, `fit_fourier`, `f_to_e`, `e_to_f` | Parametric closed outlines |
 | `pixelize_ellipse`, `image_metrics`, `load_lightcurve` | Utilities (mirror-invariant correlation, IoU, moment aspect ratio) |
 
@@ -164,9 +170,9 @@ Conventions:
 | Forward-model accuracy (sphere, r = 0.1, a = 3) | ≈1220 ppm max error vs squishyplanet/batman on a 20×15 grid | 19 ppm (n = 70 samples) / 5.6 ppm (n = 140) for parametric outlines |
 | Exposure-time smearing | No | `exptime`, `supersample` |
 | Least squares | CLSQ on a folded (symmetric) half-grid, unweighted | Full unfolded grid, noise-weighted (`errors`), bounds [0, 1] |
-| Mirror (up/down) degeneracy | Folded away; images symmetric by construction | Not folded. The single-blob prior (closed pixel) or a parametric outline returns one side. That side is a convention: fitted b ≥ 0 puts it in the upper half |
-| Arc / stretch smearing | Present (vertical streaks) | Suppressed by smoothness, compactness and connected support, or eliminated by parametric outlines |
-| Connectivity / closed shape | None | `closed_pixel`: largest connected component, holes filled, dilated support, refit |
+| Mirror (up/down) degeneracy | Folded away; images symmetric by construction | Not folded. `closed` keeps one connected region; when the mirror copies are separate patches, the one with more opacity is kept (exact ties go to the upper half). Parametric outlines and `closed-regularized` choose a side through the fitted b ≥ 0 (upper half) |
+| Arc / stretch smearing | Present (vertical streaks) | `closed`: only streaks that are not connected to the main patch are removed. `closed-regularized` (opt-in) also suppresses them with smoothness and compactness. Parametric outlines eliminate them |
+| Connectivity / closed shape | None | `closed_pixel`: largest connected patch, grown by 1 pixel, refit inside it (holes optional). `closed_pixel_regularized` also fills holes |
 | Parametric outlines | None | Sphere, axis-aligned ellipse, ellipse × exp(Fourier K) star-convex outline, with σ_f and Δχ² vs sphere |
 | SART, arcAvg, arcPars, arcComb, wedge rearrangement | Yes | **Not included** (use EightBitTransit for these) |
 | Image-file input (`imfile`, low-res modes) | Yes | No |
@@ -188,7 +194,7 @@ Setup:
 |---|---|---|---|---|
 | EightBitTransit CLSQ (baseline) | 0.20–0.27 | ≤ 0.07 | 0.72–0.86 (aspect off ~3×) | 76–358 ppm |
 | Corrected forward model, plain CLSQ | 0.24–0.38 | 0.03–0.16 | 0.73–0.89 | 5–206 ppm |
-| Closed pixel (single blob) | 0.87–0.95 | 0.35–0.75 | 0.19–0.38 | 129–261 ppm |
+| Closed pixel, regularized (0.1.0 `closed`, now `closed-regularized`) | 0.87–0.95 | 0.35–0.75 | 0.19–0.38 | 129–261 ppm |
 | Ellipse fit | 0.96–1.00 | 0.49–0.99 | 0.01 | 15–18 ppm |
 | Closed Fourier outline (K = 3) | 0.96–1.00 | 0.48–0.99 | 0.01 | 13–17 ppm |
 
@@ -216,7 +222,8 @@ Setup:
 - The ellipse benchmarks use truths drawn from the same family, so they are optimistic. The generic Fourier outline performs similarly.
 - Oblateness sensitivity requires an independent a/R\* (stellar density, or RV plus stellar radius). Limb darkening is assumed known; freeing it adds a further degeneracy with f.
 - There is a systematic floor of about 0.01 in f for large planets, from point-sampling discretization (`n = 70`) and LD-approximation differences. Increase `n` in `TransitingImage.fit(..., n=)` for high-SNR data.
-- The closed-pixel inversion pulls f towards 0 because of its isotropic compactness term, and it can clip blobs on very coarse grids (≤ 12×12). The defaults `lam = 0.3` and `mu = 10` were tuned on TESS-like simulations.
+- `closed` (connected-only) keeps the arc and stretch freedom inside its region, so its edges can be ragged or spiky. The 0.1.0 benchmark numbers above were made with what is now `closed-regularized`.
+- `closed-regularized` pulls f towards 0 because of its isotropic compactness term, and it can clip blobs on very coarse grids (≤ 12×12). Its defaults `lam = 0.3` and `mu = 10` were tuned on TESS-like simulations.
 - The silhouette is assumed rigid and non-rotating: its sky-projected shape is constant during transit. Orbits are circular.
 - There is no SART or arc-combinatorics machinery. For those, and for exact EightBitTransit reproduction, use EightBitTransit itself.
 

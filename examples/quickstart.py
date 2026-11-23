@@ -29,7 +29,7 @@ truth_img = cs.pixelize_ellipse(N, M, 0.0, b, ra / np.sqrt(1 - f_true), ra * np.
 # EightBitTransit-style: TransitingImage(..., LDlaw, LDCs, v / a,P, t_ref, t_arr) then invert
 ti = cs.TransitingImage(N=N, M=M, LDlaw="nonlinear", LDCs=LD, a=a, P=P, t_ref=0.0, t_arr=t, fluxes=flux, errors=sig)
 imgs = {}
-for method in ["clsq", "closed", "ellipse", "fourier"]:
+for method in ["clsq", "closed", "closed-regularized", "ellipse", "fourier"]:
     imgs[method] = ti.invertLC(method=method).copy()
     mt = cs.image_metrics(imgs[method], truth_img)
     print(f"[injection] {method:8s} corr={mt['corr']:.2f} IoU={mt['iou']:.2f} f_moment={mt['f_moment']:+.2f}")
@@ -37,7 +37,7 @@ for k in ["ellipse", "fourier"]:
     r = ti.fits[k]
     print(f"[injection] {k:8s} f = {r['f']:+.3f} +/- {r['sig_f']:.3f} (true {f_true}), b = {r['b']:.3f}, "
           f"dchi2 vs sphere = {r['dchi2_vs_sphere']:.1f}")
-fig, axs = plt.subplots(1, 5, figsize=(12, 3))
+fig, axs = plt.subplots(1, 6, figsize=(14, 3))
 for ax, (k, g) in zip(axs, [("truth", truth_img)] + list(imgs.items())):
     ax.imshow(g, cmap="Greys", vmin=0, vmax=1, interpolation="none"); ax.set_title(k); ax.set_xticks([]); ax.set_yticks([])
 fig.tight_layout(); fig.savefig(os.path.join(out, "injection_recovery.png"), dpi=110)

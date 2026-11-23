@@ -1,4 +1,5 @@
-"""Pixel inversions: weighted bounded least squares (CLSQ) and the closed-shape pixel inversion."""
+"""Pixel inversions: weighted bounded least squares (CLSQ), the connected-only closed inversion, and the opt-in
+regularized closed inversion."""
 import numpy as np
 from scipy import ndimage, sparse
 from scipy.optimize import lsq_linear
@@ -51,9 +52,10 @@ def clsq(A, flux, sig, N, M, lam=0.0, mu=0.0, centre=None, support=None, zero_co
     return g.reshape(N, M)
 
 
-def largest_blob(g, thr=0.3, prefer_upper=True):
-    """Boolean mask of the connected component (4-connectivity) of g > thr*max(g) with the largest summed opacity,
-    holes filled. Ties are broken towards the upper half of the grid (mirror-degeneracy convention)."""
+def largest_blob(g, thr=0.3, prefer_upper=True, fill_holes=True):
+    """Boolean mask of the connected component (4-connectivity) of g > thr*max(g) with the largest summed opacity.
+    fill_holes: also switch on pixels enclosed by the component (a "no holes" assumption on top of "connected").
+    Ties are broken towards the upper half of the grid (mirror-degeneracy convention)."""
     N, M = g.shape
     m = g > thr * g.max() if g.max() > 0 else np.zeros_like(g, bool)
     lab, n = ndimage.label(m)
@@ -61,18 +63,40 @@ def largest_blob(g, thr=0.3, prefer_upper=True):
         return m
     _, yc, _ = grid_coords(N, M)
     score = [g[lab == k].sum() + 1e-9 * prefer_upper * (yc[np.where(lab == k)[0]].mean() > 0) for k in range(1, n + 1)]
-    return ndimage.binary_fill_holes(lab == 1 + int(np.argmax(score)))
+    keep = lab == 1 + int(np.argmax(score))
+    return ndimage.binary_fill_holes(keep) if fill_holes else keep
 
 
-def closed_pixel(A, flux, sig, N, M, lam=0.3, mu=10.0, centre=None, thr=0.3, n_iter=2, dilate=1):
-    """Closed-shape pixel inversion ("P2"): smooth + compact CLSQ, keep one connected hole-free blob, dilate by
-    `dilate` px, refit with every pixel outside that support forced to zero; repeat n_iter times.
-    The result is non-zero only on a single connected region, which removes EightBitTransit's up/down mirror
-    ambiguity and the arc/stretch smearing by construction. Defaults (lam=0.3, mu=10) were tuned on simulations
-    (see README)."""
+def closed_pixel(A, flux, sig, N, M, thr=0.3, n_iter=2, dilate=1, fill_holes=False, return_support=False):
+    """Connected-only pixel inversion (default ``--method closed``).
+
+    The only constraint added to plain CLSQ (bounded 0..1, noise-weighted, full unfolded grid) is that opacity may be
+    non-zero only inside ONE connected region of pixels. No smoothness and no compactness penalty.
+    Steps: plain CLSQ -> keep the largest 4-connected patch of pixels above thr*max -> grow it by `dilate` pixels ->
+    refit plain CLSQ with every pixel outside that region forced to zero; repeat n_iter times.
+    fill_holes=False (default): the region may have holes (an annulus is still connected). Set True to also
+    assume "no holes". Pixels inside the region may still come out at 0, so the region bounds the object
+    rather than being filled by it. return_support=True also returns the final allowed region.
+    """
+    g = clsq(A, flux, sig, N, M)
+    keep = np.ones((N, M), bool)
+    for _ in range(n_iter):
+        k = largest_blob(g, thr, fill_holes=fill_holes)
+        if not k.any():
+            break
+        keep = ndimage.binary_dilation(k, iterations=dilate)
+        g = clsq(A, flux, sig, N, M, support=keep)
+    return (g, keep) if return_support else g
+
+
+def closed_pixel_regularized(A, flux, sig, N, M, lam=0.3, mu=10.0, centre=None, thr=0.3, n_iter=2, dilate=1):
+    """Opt-in add-on (``--method closed-regularized``), identical to the 0.1.0 ``closed`` method:
+    connected-only inversion PLUS a smoothness penalty (lam, L2 gradient) PLUS a compactness penalty (mu, pull towards
+    `centre`), with holes filled. Defaults (lam=0.3, mu=10) were tuned on simulations. These extra terms are priors,
+    not part of the connected-region assumption."""
     g = clsq(A, flux, sig, N, M, lam=lam, mu=mu, centre=centre)
     for _ in range(n_iter):
-        keep = largest_blob(g, thr)
+        keep = largest_blob(g, thr, fill_holes=True)
         if not keep.any():
             break
         keep = ndimage.binary_dilation(keep, iterations=dilate)

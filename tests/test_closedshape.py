@@ -65,14 +65,40 @@ def test_ellipse_recovers_f_noiseless():
     assert ell["chi2"] < 5 and cs.fit_sphere(m, y, 200e-6)["chi2"] > 100
 
 
-def test_closed_pixel_single_blob():
+def test_closed_connected_only():
+    """Default 'closed': opacity only inside ONE connected region; no smoothness/compactness terms accepted."""
     t, y, I, F = _sim()
     ti = cs.TransitingImage(N=14, M=12, LDlaw="quadratic", LDCs=[0.4, 0.2], a=3.0, P=1.0, t_arr=t, fluxes=y, errors=200e-6)
     g = ti.invertLC(method="closed")
+    assert ndimage.label(ti.support)[1] == 1           # the allowed region is a single connected patch
+    assert np.all(g[~ti.support] == 0)                  # nothing outside it
+    assert g.min() >= 0 and g.max() <= 1
+    assert np.std(ti.gen_LC()[0] - y) < 400e-6
+    assert "sphere" not in ti.fits                      # no sphere fit / centring in the default method
+    import pytest
+    with pytest.raises(ValueError):
+        ti.invertLC(method="closed", lam=0.3)
+
+
+def test_closed_regularized_single_blob():
+    """Opt-in 'closed-regularized' (the 0.1.0 'closed'): one blob, holes filled, smooth + compact."""
+    t, y, I, F = _sim()
+    ti = cs.TransitingImage(N=14, M=12, LDlaw="quadratic", LDCs=[0.4, 0.2], a=3.0, P=1.0, t_arr=t, fluxes=y, errors=200e-6)
+    g = ti.invertLC(method="closed-regularized")
     lab, n = ndimage.label(g > 1e-3)
     assert n == 1
     assert not ndimage.binary_fill_holes(g > 1e-3)[~(g > 1e-3)].any()   # no holes
     assert np.std(ti.gen_LC()[0] - y) < 400e-6
+
+
+def test_closed_matches_regularized_with_zero_penalties():
+    """closed_pixel == closed_pixel_regularized(lam=0, mu=0) apart from hole filling (fill_holes=True)."""
+    t, y, I, F = _sim()
+    ti = cs.TransitingImage(N=12, M=10, LDlaw="quadratic", LDCs=[0.4, 0.2], a=3.0, P=1.0, t_arr=t, fluxes=y, errors=200e-6)
+    A = ti.design()
+    g1 = cs.closed_pixel(A, y, 200e-6, 12, 10, fill_holes=True)
+    g2 = cs.closed_pixel_regularized(A, y, 200e-6, 12, 10, lam=0.0, mu=0.0)
+    assert np.allclose(g1, g2, atol=1e-6)
 
 
 def test_transitingimage_ebt_style_roundtrip():
