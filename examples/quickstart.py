@@ -37,9 +37,10 @@ for k in ["ellipse", "fourier"]:
     r = ti.fits[k]
     print(f"[injection] {k:8s} f = {r['f']:+.3f} +/- {r['sig_f']:.3f} (true {f_true}), b = {r['b']:.3f}, "
           f"dchi2 vs sphere = {r['dchi2_vs_sphere']:.1f}")
+LABELS = {"clsq": "EightBitTransit CLSQ"}  # our re-implementation of EBT's CLSQ
 fig, axs = plt.subplots(1, 6, figsize=(14, 3))
 for ax, (k, g) in zip(axs, [("truth", truth_img)] + list(imgs.items())):
-    ax.imshow(g, cmap="Greys", vmin=0, vmax=1, interpolation="none"); ax.set_title(k); ax.set_xticks([]); ax.set_yticks([])
+    ax.imshow(g, cmap="Greys", vmin=0, vmax=1, interpolation="none"); ax.set_title(LABELS.get(k, k)); ax.set_xticks([]); ax.set_yticks([])
 fig.tight_layout(); fig.savefig(os.path.join(out, "injection_recovery.png"), dpi=110)
 
 # ---------------- 2. WASP-12b-style ----------------
