@@ -12,7 +12,7 @@ The parametric outlines (sphere, ellipse, Fourier) and `closed-regularized` are 
 It keeps EightBitTransit's workflow (`TransitingImage(opacitymat / N, M, LDlaw, LDCs, v, t_ref, t_arr)`, `gen_LC`, `invertLC`, `plot_grid`). It is pure NumPy/SciPy, with no Cython and no GPU.
 
 ![injection-recovery example](docs/injection_recovery.png)
-*Oblate occulter (f = 0.5, r = 0.15 R\*, b = 0.35), TESS-like noise. Panels: truth; plain pixel least squares (EightBitTransit-like CLSQ); closed-pixel inversion; ellipse fit; closed Fourier outline. Made with version 0.1.0, so the closed-pixel panel is what is now called `closed-regularized`. Running `examples/quickstart.py` now shows both `closed` and `closed-regularized`.*
+*Oblate occulter (f = 0.5, r = 0.15 R\*, b = 0.35), TESS-like noise. Panels: truth; EightBitTransit CLSQ (our re-implementation, `--method clsq`: plain pixel least squares, no priors); closed-pixel inversion; ellipse fit; closed Fourier outline. Made with version 0.1.0, so the closed-pixel panel is what is now called `closed-regularized`. Running `examples/quickstart.py` now shows both `closed` and `closed-regularized`.*
 
 ## How this differs from EightBitTransit
 
