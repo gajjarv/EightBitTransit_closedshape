@@ -7,10 +7,33 @@
    - a non-parametric *single connected, hole-free blob* inversion, or
    - parametric closed outlines: sphere, ellipse, or ellipse × Fourier deformation.
 
+The parametric outlines (sphere, ellipse, Fourier) are **new additions**; they are not part of EightBitTransit. The pixel methods `clsq` (EightBitTransit-like baseline) and `closed` (closed-shape prior) are the direct counterparts of EightBitTransit's inversions.
+
 It keeps EightBitTransit's workflow (`TransitingImage(opacitymat / N, M, LDlaw, LDCs, v, t_ref, t_arr)`, `gen_LC`, `invertLC`, `plot_grid`). It is pure NumPy/SciPy, with no Cython and no GPU.
 
 ![injection-recovery example](docs/injection_recovery.png)
 *Oblate occulter (f = 0.5, r = 0.15 R\*, b = 0.35), TESS-like noise. Panels: truth; plain pixel least squares (EightBitTransit-like CLSQ); closed-pixel inversion; ellipse fit; closed Fourier outline. Produced by `examples/quickstart.py`.*
+
+## How this differs from EightBitTransit
+
+**Full, code-referenced comparison: [docs/COMPARISON_WITH_EBT.md](docs/COMPARISON_WITH_EBT.md).** In short:
+
+- **No EightBitTransit code is copied or modified in this package.** It is a new implementation that keeps EBT's grid convention (`positions`), its `[0, 1]` opacity bounds, the `lsq_linear` solver from EBT's constrained-least-squares example, and its `TransitingImage` / `gen_LC` / `invertLC` names.
+- **What EBT's methods do at the midplane:**
+  - SART solves only the top half of the grid, then mirrors it and halves it.
+  - Arc averaging, dF/dt parsimony and arc combinatorics fill pixels in mirror pairs and then average the image with its mirror.
+  - CLSQ (in EBT's example notebooks) folds the design matrix.
+  - So every EBT image is up/down symmetric by construction.
+- **`clsq` here is the EBT-like baseline.** It solves the full grid (no folding), with noise weighting and the new forward model, and has no prior.
+- **`closed` adds** a smoothness penalty, a compactness pull towards (mid-transit, the sphere-fit impact parameter), and a single connected, hole-free support region. Its up/down side is a convention: the impact parameter b ≥ 0 puts the blob in the upper half.
+- **The forward model is new:**
+  - per-sub-pixel limb darkening, instead of EBT's small-planet `LDfluxsmall`;
+  - partial pixel coverage at the stellar limb;
+  - optional curved circular orbit (EBT's straight path is still the default when only `v` is given);
+  - exposure smearing;
+  - errors used as weights.
+- **Not included:** SART, arcAvg, arcPars, arcComb, wedge rearrangement. Use EBT itself for these.
+- Every added assumption is listed in the doc, split into physical and numerical choices. The doc also includes the small local patches we applied to the EBT GPU fork to run the baseline ([docs/ebt_gpu_baseline_patches.diff](docs/ebt_gpu_baseline_patches.diff)).
 
 ## Why: the degeneracies of shadow imaging
 
@@ -33,7 +56,7 @@ This is a *stronger assumption*. Rings, tails, debris or multiple bodies violate
 ## Installation
 
 ```bash
-git clone <your-fork-url> closed-shape-shadow-imaging
+git clone https://github.com/gajjarv/EightBitTransit_closedshape closed-shape-shadow-imaging
 cd closed-shape-shadow-imaging
 pip install -e .            # numpy, scipy, matplotlib
 pip install -e ".[test]"    # + pytest, batman-package (for the batman comparison test)
@@ -141,7 +164,7 @@ Conventions:
 | Forward-model accuracy (sphere, r = 0.1, a = 3) | ≈1220 ppm max error vs squishyplanet/batman on a 20×15 grid | 19 ppm (n = 70 samples) / 5.6 ppm (n = 140) for parametric outlines |
 | Exposure-time smearing | No | `exptime`, `supersample` |
 | Least squares | CLSQ on a folded (symmetric) half-grid, unweighted | Full unfolded grid, noise-weighted (`errors`), bounds [0, 1] |
-| Mirror (up/down) degeneracy | Folded away; images symmetric by construction | Broken by the single-blob prior (closed pixel) or a parametric outline; side chosen by the fitted impact parameter |
+| Mirror (up/down) degeneracy | Folded away; images symmetric by construction | Not folded. The single-blob prior (closed pixel) or a parametric outline returns one side. That side is a convention: fitted b ≥ 0 puts it in the upper half |
 | Arc / stretch smearing | Present (vertical streaks) | Suppressed by smoothness, compactness and connected support, or eliminated by parametric outlines |
 | Connectivity / closed shape | None | `closed_pixel`: largest connected component, holes filled, dilated support, refit |
 | Parametric outlines | None | Sphere, axis-aligned ellipse, ellipse × exp(Fourier K) star-convex outline, with σ_f and Δχ² vs sphere |
